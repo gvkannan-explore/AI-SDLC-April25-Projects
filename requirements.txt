@@ -1,0 +1,20 @@
+# Core AI/LLM Framework
+llama-index-core
+llama-index-llms-google_genai
+llama-index-llms-gemini ## To be depreciated.
+llama-index-embeddings-openai
+llama-index-llms-openai
+llama-index-llms-anthropic
+openai
+anthropic
+
+
+## For UI and Visualization
+gradio
+PyMuPDF # fitz
+datasette
+rich
+
+# Environment & Notebooks
+python-dotenv
+jupyterlab # or ipython
