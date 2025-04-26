@@ -1,0 +1,1 @@
+## Objective: Using the RAG system from HW1, create a simple web app using Gradio and capture the system log for debugging and create a MVE!

@@ -1,3 +1,5 @@
 workshop1/apps/*
 *.env
 .DS_Store
+*.db
+*.json
