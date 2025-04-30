@@ -3,35 +3,32 @@
 # - Log interaction into a json file!
 
 import argparse
-import os
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
-import sys
-from dotenv import load_dotenv
-import gradio as gr
-from datetime import datetime
-import uuid
-from tqdm.notebook import tqdm
-import traceback
-from rich import print
 import json
-import re
-import pandas as pd
-import openai
-import torch
-from torch.nn import functional as F
 import logging
+import os
+import sys
+import traceback
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
+import openai
+import pandas as pd
+import torch
+from dotenv import load_dotenv
+from rich import print
+from torch.nn import functional as F
 
 MODEL_CONFIG = {
-        "model_name": "gpt-4o-mini",
-        "model_provider": "openai",
-        "model_parameters": {
-            "max_tokens": 1000,
-            "top_p": 1,
-            "temperature": 0.3,
-        }
-    }
+    "model_name": "gpt-4o-mini",
+    "model_provider": "openai",
+    "model_parameters": {
+        "max_tokens": 1000,
+        "top_p": 1,
+        "temperature": 0.3,
+    },
+}
 
 RESTRICTIONS = """
 Don't hallucinate
@@ -54,13 +51,11 @@ Answer:
 """
 
 
-
-
 # Replace the database reading code with JSON reading
 def read_interactions_log(log_dir: Path) -> pd.DataFrame:
     interactions_file = log_dir / "interactions.json"
     if interactions_file.exists():
-        with open(interactions_file, 'r') as f:
+        with open(interactions_file, "r") as f:
             data = json.load(f)
         return pd.DataFrame(data)
     return pd.DataFrame()
@@ -72,19 +67,25 @@ class Document:
         self.text = text
         self.metadata = metadata or {}
 
+
 class Node:
     def __init__(
-            self, 
-            text: str, 
-            metadata: Optional[Dict[str, Any]] = None,
-            node_id: Optional[str] = None):
+        self,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        node_id: Optional[str] = None,
+    ):
         self.text = text
         self.metadata = metadata or {}
-        self.node_id = node_id or f"node_{id(self)}" ## Simple Unique ID if not provided
+        self.node_id = (
+            node_id or f"node_{id(self)}"
+        )  ## Simple Unique ID if not provided
 
     def __repr__(self):
-        return f"Node(id={self.node_id}, text={self.text[:50]}, metadata={self.metadata})"
-    
+        return (
+            f"Node(id={self.node_id}, text={self.text[:50]}, metadata={self.metadata})"
+        )
+
 
 class Response:
     def __init__(self, response: str, prompt: str) -> None:
@@ -93,10 +94,11 @@ class Response:
 
     def __str__(self) -> str:
         return self.response
-    
-## 3. For Indexing      
+
+
+## 3. For Indexing
 class SimpleNodeParser:
-    def __init__(self, chunk_size: int = 4096, chunk_overlap: int= 200) -> None:
+    def __init__(self, chunk_size: int = 4096, chunk_overlap: int = 200) -> None:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
@@ -104,10 +106,10 @@ class SimpleNodeParser:
         """Split text into chunks with overalap"""
         if len(text) <= self.chunk_size:
             return [text]
-        
+
         chunks = []
         for i in range(0, len(text), self.chunk_size - self.chunk_overlap):
-            chunk = text[i:i+self.chunk_size]
+            chunk = text[i : i + self.chunk_size]
             if chunk:
                 chunks.append(chunk)
 
@@ -121,31 +123,34 @@ class SimpleNodeParser:
             for i, text_chunk in enumerate(text_chunks):
                 ## Copy metadata and add chunk info:
                 metadata = doc.metadata.copy()
-                metadata.update({
-                    "chunk_index": i,
-                    "total_chunks": len(text_chunks),
+                metadata.update(
+                    {
+                        "chunk_index": i,
+                        "total_chunks": len(text_chunks),
+                    }
+                )
+                nodes.append(Node(text=text_chunk, metadata=metadata))
 
-                })
-                nodes.append(Node(
-                    text=text_chunk, metadata=metadata))
-                
         return nodes
-    
+
+
 class SimpleDirectoryReader:
     """Read all text files from a directory and return a list of documents."""
+
     def __init__(self, directory_path: str) -> None:
         self.directory_path = directory_path
 
-    def load_data(self) -> List['Document']:
-        """ Load all text files from the directory. """
+    def load_data(self) -> List["Document"]:
+        """Load all text files from the directory."""
         documents = []
         for filename in os.listdir(self.directory_path):
-            if filename.endswith('.txt'):
-                with open(os.path.join(self.directory_path, filename), 'r', encoding='utf-8') as file:
+            if filename.endswith(".txt"):
+                with open(
+                    os.path.join(self.directory_path, filename), "r", encoding="utf-8"
+                ) as file:
                     text = file.read()
                 documents.append(Document(text, metadata={"source": filename}))
         return documents
-
 
 
 ## Need to create a base embedding class that extensible for different embedding models: Cohere and HuggingFace.
@@ -154,11 +159,12 @@ class BaseEmbedding:
         """Get embedding from a single text file using API."""
         raise NotImplementedError("Subclasses must implement this method.")
 
+
 class OpenAIEmbedding(BaseEmbedding):
     def __init__(self, model_name: str = "text-embedding-ada-002") -> None:
         self.model_name = model_name
 
-    def get_embedding(self, text: str ) -> List[float]:
+    def get_embedding(self, text: str) -> List[float]:
         """Get embedding from a single text file using OpenAI API."""
         response = openai.embeddings.create(
             model=self.model_name,
@@ -166,51 +172,58 @@ class OpenAIEmbedding(BaseEmbedding):
             encoding_format="float",
         )
         return response.data[0].embedding
-    
-    def get_embeddings(self, texts:List[str]) -> List[List[float]]:
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Get embeddings for a list of texts."""
         return [self.get_embedding(text) for text in texts]
-    
+
+
 class LLMResponseSynthesizer:
-    def __init__(self, restrictions: str = RESTRICTIONS, prompt_template: str = PROMPT_TEMPLATE, model_config: Dict[str, Any] = MODEL_CONFIG) -> None:
-        self.client = openai.OpenAI() ## Need to update this to support different LLM providers.
+    def __init__(
+        self,
+        restrictions: str = RESTRICTIONS,
+        prompt_template: str = PROMPT_TEMPLATE,
+        model_config: Dict[str, Any] = MODEL_CONFIG,
+    ) -> None:
+        self.client = (
+            openai.OpenAI()
+        )  ## Need to update this to support different LLM providers.
         self.model_config = model_config
 
         self.restrictions = restrictions
         self.prompt_template = prompt_template
 
     def synthesize(self, query: str, nodes: List[Node]) -> Response:
-        """Synthesize a response from the context and query using the initialized LLM.        
-        """
+        """Synthesize a response from the context and query using the initialized LLM."""
 
         ## Build context from nodes:
         context = "\n\n".join([f"Document chunk: {node.text}" for node in nodes])
 
         ## Build the prompt with context and query:
-        prompt = self.prompt_template.format(context=context, query=query, restrictions=self.restrictions)
+        prompt = self.prompt_template.format(
+            context=context, query=query, restrictions=self.restrictions
+        )
         # print(prompt)
 
         ## Call OpenAI API:
         response = self.client.chat.completions.create(
-            model=self.model_config['model_name'],
-            max_tokens=self.model_config['model_parameters']['max_tokens'],
-            top_p=self.model_config['model_parameters']['top_p'],
-            temperature=self.model_config['model_parameters']['temperature'],
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }],
+            model=self.model_config["model_name"],
+            max_tokens=self.model_config["model_parameters"]["max_tokens"],
+            top_p=self.model_config["model_parameters"]["top_p"],
+            temperature=self.model_config["model_parameters"]["temperature"],
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        return Response(response=response, prompt=prompt) # type: ignore
+        return Response(response=response, prompt=prompt)  # type: ignore
 
 
 class SimpleVectorStore:
     """Simple Vector Store: Functionalities to add nodes, retrieve nodes based on similarity search (top_k using cosine similarity)"""
+
     def __init__(self) -> None:
         self.embeddings = []
         self.node_ids = []
-        self.node_dict = {} ## Store actual node objects by ID
+        self.node_dict = {}  ## Store actual node objects by ID
 
     def add_notes(self, nodes: List[Node], embeddings: List[List[float]]) -> None:
         for node, embedding in zip(nodes, embeddings):
@@ -218,14 +231,16 @@ class SimpleVectorStore:
             self.node_ids.append(node.node_id)
             self.node_dict[node.node_id] = node
 
-    def similarity_search(self, query_embedding: List[float], top_k: int = 2) -> List[Node]:
+    def similarity_search(
+        self, query_embedding: List[float], top_k: int = 2
+    ) -> List[Node]:
         """Find `top_k` most similar nodes to the query embedding using cosine similarity."""
 
         if not self.embeddings:
             logging.warning("No embeddings in the vector store.")
             return []
-        
-        ## Convert lists to tensor 
+
+        ## Convert lists to tensor
         query_tensor = torch.tensor(query_embedding, dtype=torch.float32)
         embeddings_tensor = torch.tensor(self.embeddings, dtype=torch.float32)
 
@@ -241,15 +256,16 @@ class SimpleVectorStore:
 
         ## Return the nodes corresponding to the top_k indices:
         return [self.node_dict[self.node_ids[idx]] for idx in top_indices]
-    
+
+
 ## Query Engine:
 class QueryEngine:
     def __init__(
-            self, 
-            vector_store: SimpleVectorStore, 
-            response_synthesizer: LLMResponseSynthesizer, 
-            similarity_topk: int = 2,
-            ) -> None:
+        self,
+        vector_store: SimpleVectorStore,
+        response_synthesizer: LLMResponseSynthesizer,
+        similarity_topk: int = 2,
+    ) -> None:
         self.vector_store = vector_store
         self.response_synthesizer = response_synthesizer
         self.embedding_service = OpenAIEmbedding()
@@ -259,7 +275,7 @@ class QueryEngine:
         """Execute the query and return the response."""
 
         ## Get query embedding:
-        query_embedding = self.embedding_service.get_embedding(query) # type: ignore ## Single statement so we use `get_embedding`
+        query_embedding = self.embedding_service.get_embedding(query)  # type: ignore ## Single statement so we use `get_embedding`
 
         ## Retrieve the relevant nodes using similarity search:
         retrieved_nodes = self.vector_store.similarity_search(
@@ -268,26 +284,35 @@ class QueryEngine:
         )
 
         ## Generate response
-        response = self.response_synthesizer.synthesize(query=query, nodes=retrieved_nodes)
+        response = self.response_synthesizer.synthesize(
+            query=query, nodes=retrieved_nodes
+        )
 
         return response
-    
+
+
 ## Vector Store Index:
 class VectorStoreIndex:
     """Vector Store Index: Manage nodes, embeddings, and vector store."""
-    def __init__(self, nodes: List[Node], vector_store: SimpleVectorStore, similarity_topk: int = 2) -> None:
+
+    def __init__(
+        self,
+        nodes: List[Node],
+        vector_store: SimpleVectorStore,
+        similarity_topk: int = 2,
+    ) -> None:
         self.nodes = nodes
         self.vector_store = vector_store
         self.similarity_topk = similarity_topk
 
     @classmethod
     def from_documents(
-        cls, 
+        cls,
         documents: List[Document],
         embedding_service: OpenAIEmbedding,
-        node_parser=None) -> 'VectorStoreIndex':
-
-        """ Create index from documents"""
+        node_parser=None,
+    ) -> "VectorStoreIndex":
+        """Create index from documents"""
         ## Initialize the embedding service:
         embedding_service = embedding_service or OpenAIEmbedding()
         node_parser = node_parser or SimpleNodeParser()
@@ -304,23 +329,26 @@ class VectorStoreIndex:
         vector_store.add_notes(nodes=nodes, embeddings=embeddings)
 
         return cls(nodes=nodes, vector_store=vector_store)
-    
-    def as_query_engine(self, response_synthesizer: LLMResponseSynthesizer, similarity_topk: int = 2) -> QueryEngine:
+
+    def as_query_engine(
+        self, response_synthesizer: LLMResponseSynthesizer, similarity_topk: int = 2
+    ) -> QueryEngine:
         """Create a query engine from this index"""
-        response_synthesizer = response_synthesizer or LLMResponseSynthesizer() ## Default to a simple response synthesizer
+        response_synthesizer = (
+            response_synthesizer or LLMResponseSynthesizer()
+        )  ## Default to a simple response synthesizer
         return QueryEngine(
             vector_store=self.vector_store,
             response_synthesizer=response_synthesizer,
             similarity_topk=similarity_topk,
         )
 
+
 ## Configure logging to print to console.
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
@@ -332,7 +360,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 class RAGInteractionLogger:
     """Handles logging of RAG system interactions to JSON files"""
-    
+
     def __init__(self, log_dir: str = "logs"):
         self.log_dir = Path(log_dir)
         self.interactions_file = self.log_dir / "interactions.json"
@@ -342,92 +370,101 @@ class RAGInteractionLogger:
     def _init_log_files(self) -> None:
         """Initialize JSON log files if they don't exist"""
         self.log_dir.mkdir(exist_ok=True)
-        
+
         # Initialize interactions file
         if not self.interactions_file.exists():
-            self.interactions_file.write_text('[]')
+            self.interactions_file.write_text("[]")
             logger.info(f"Created interactions log file at {self.interactions_file}")
-        
+
         # Initialize system logs file
         if not self.system_logs_file.exists():
-            self.system_logs_file.write_text('[]')
+            self.system_logs_file.write_text("[]")
             logger.info(f"Created system logs file at {self.system_logs_file}")
-    
+
     def _read_json_file(self, file_path: Path) -> List[Dict]:
         """Helper method to read JSON file"""
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 return json.load(f)
         except json.JSONDecodeError:
             return []
-    
+
     def _write_json_file(self, file_path: Path, data: List[Dict]) -> None:
         """Helper method to write JSON file"""
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(data, f, indent=2)
-    
+
     def log_system_event(
-            self, 
-            level: str,
-            message: str,
-            module: str,
-            function: str,
-            traceback: str,
-            llm_config: Optional[Dict[str, Any]] = None,
-            ) -> None:
+        self,
+        level: str,
+        message: str,
+        module: str,
+        function: str,
+        traceback: str,
+        llm_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Log system events to JSON file"""
         log_entry = {
-            'id': str(uuid.uuid4()),
-            'timestamp': datetime.now().isoformat(),
-            'level': level,
-            'message': message,
-            'module': module,
-            'function': function,
-            'traceback': traceback,
-            'llm_config': llm_config or {}
+            "id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "level": level,
+            "message": message,
+            "module": module,
+            "function": function,
+            "traceback": traceback,
+            "llm_config": llm_config or {},
         }
-        
+
         logs = self._read_json_file(self.system_logs_file)
         logs.append(log_entry)
         self._write_json_file(self.system_logs_file, logs)
-    
-    def log_interaction(self, 
-                       query: str, 
-                       response: str, 
-                       source_document: str,
-                       system_prompt: str,
-                       model_name: str,
-                       model_type: str,
-                       model_parameters: Dict[str, Any],
-                       retrieved_context: List[str],
-                       metadata: Optional[Dict[str, Any]] = None,
-                       processing_time: float = 0.0,
-                       token_usage: Optional[Dict[str, int]] = None) -> None:
+
+    def log_interaction(
+        self,
+        query: str,
+        response: str,
+        source_document: str,
+        system_prompt: str,
+        model_name: str,
+        model_type: str,
+        model_parameters: Dict[str, Any],
+        retrieved_context: List[str],
+        metadata: Optional[Dict[str, Any]] = None,
+        processing_time: float = 0.0,
+        token_usage: Optional[Dict[str, int]] = None,
+    ) -> None:
         """Log an interaction to JSON file"""
         interaction = {
-            'id': str(uuid.uuid4()),
-            'timestamp': datetime.now().isoformat(),
-            'query': query,
-            'response': response,
-            'source_document': source_document,
-            'system_prompt': system_prompt,
-            'model_name': model_name,
-            'model_type': model_type,
-            'model_parameters': model_parameters,
-            'retrieved_context': retrieved_context,
-            'processing_time': processing_time,
-            'token_usage': token_usage or {},
-            'metadata': metadata or {}
+            "id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "query": query,
+            "response": response,
+            "source_document": source_document,
+            "system_prompt": system_prompt,
+            "model_name": model_name,
+            "model_type": model_type,
+            "model_parameters": model_parameters,
+            "retrieved_context": retrieved_context,
+            "processing_time": processing_time,
+            "token_usage": token_usage or {},
+            "metadata": metadata or {},
         }
-        
+
         interactions = self._read_json_file(self.interactions_file)
         interactions.append(interaction)
         self._write_json_file(self.interactions_file, interactions)
 
 
-
 class RAGwithLogging:
-    def __init__(self, data_dir: str, model_config: Dict[str, Any], log_dir: str = "logs", similarity_topk: int = 2, restrictions: str = RESTRICTIONS, prompt_template: str = PROMPT_TEMPLATE):
+    def __init__(
+        self,
+        data_dir: str,
+        model_config: Dict[str, Any],
+        log_dir: str = "logs",
+        similarity_topk: int = 2,
+        restrictions: str = RESTRICTIONS,
+        prompt_template: str = PROMPT_TEMPLATE,
+    ):
         self.data_dir = data_dir
         self.similarity_topk = similarity_topk
         self.model_config = model_config
@@ -436,7 +473,9 @@ class RAGwithLogging:
         self.logger = RAGInteractionLogger(log_dir=log_dir)
         self.documents = self._load_documents()
         self.vector_index = self.create_vector_index()
-        self.query_engine = self._create_query_engine() ## Fundctions not meant to be called directly.
+        self.query_engine = (
+            self._create_query_engine()
+        )  ## Fundctions not meant to be called directly.
 
     def _load_documents(self) -> List[Document]:
         """
@@ -445,22 +484,22 @@ class RAGwithLogging:
         try:
             documents = []
             for filename in os.listdir(self.data_dir)[:3]:
-                if filename.endswith('.txt'):
+                if filename.endswith(".txt"):
                     file_path = os.path.join(self.data_dir, filename)
-                    with open(file_path, 'r', encoding='utf-8') as file:
+                    with open(file_path, "r", encoding="utf-8") as file:
                         text = file.read()
                     documents.append(Document(text, metadata={"source": filename}))
             return documents
-        except Exception as e: 
+        except Exception as e:
             self.logger.log_system_event(
                 level="ERROR",
                 message=f"Error loading documents: {str(e)}",
                 module=__name__,
                 function="_load_documents",
-                traceback=traceback.format_exc()
+                traceback=traceback.format_exc(),
             )
             raise Exception(f"Error loading documents: {str(e)}")
-        
+
     def create_vector_index(self) -> VectorStoreIndex:
         """Create vector index from documents and log the process"""
         try:
@@ -469,36 +508,47 @@ class RAGwithLogging:
             nodes = node_parser.get_nodes_from_documents(self.documents)
             texts = [node.text for node in nodes]
             embeddings = embedding_service.get_embeddings(texts)
-            
+
             vector_store = SimpleVectorStore()
             vector_store.add_notes(nodes=nodes, embeddings=embeddings)
 
-            return VectorStoreIndex(nodes=nodes, vector_store=vector_store, similarity_topk=self.similarity_topk)
+            return VectorStoreIndex(
+                nodes=nodes,
+                vector_store=vector_store,
+                similarity_topk=self.similarity_topk,
+            )
         except Exception as e:
             self.logger.log_system_event(
                 level="ERROR",
                 message=f"Error creating vector index: {str(e)}",
                 module=__name__,
                 function="_create_vector_index",
-                traceback=traceback.format_exc()
-            )   
+                traceback=traceback.format_exc(),
+            )
             raise Exception(f"Error creating vector index: {str(e)}")
-        
+
     def _create_query_engine(self) -> QueryEngine:
         """Create query engine from vector index and log the process"""
         try:
-            response_synthesizer = LLMResponseSynthesizer(model_config=self.model_config, restrictions=self.restrictions, prompt_template=self.prompt_template)
-            return self.vector_index.as_query_engine(response_synthesizer=response_synthesizer, similarity_topk=self.similarity_topk)
+            response_synthesizer = LLMResponseSynthesizer(
+                model_config=self.model_config,
+                restrictions=self.restrictions,
+                prompt_template=self.prompt_template,
+            )
+            return self.vector_index.as_query_engine(
+                response_synthesizer=response_synthesizer,
+                similarity_topk=self.similarity_topk,
+            )
         except Exception as e:
             self.logger.log_system_event(
                 level="ERROR",
                 message=f"Error creating query engine: {str(e)}",
                 module=__name__,
                 function="_create_query_engine",
-                traceback=traceback.format_exc()
+                traceback=traceback.format_exc(),
             )
             raise Exception(f"Error creating query engine: {str(e)}")
-        
+
     def query(self, query: str, model_config: Dict[str, Any]) -> Union[str, None]:
         """Execute query with enhanced logging"""
         start_time = datetime.now()
@@ -507,8 +557,7 @@ class RAGwithLogging:
             response = self.query_engine.query(query)
             query_embedding = self.query_engine.embedding_service.get_embedding(query)
             retrieved_nodes = self.query_engine.vector_store.similarity_search(
-                query_embedding=query_embedding,
-                top_k=self.query_engine.similarity_topk
+                query_embedding=query_embedding, top_k=self.query_engine.similarity_topk
             )
             retrieved_context = [node.text for node in retrieved_nodes]
             processing_time = (datetime.now() - start_time).total_seconds()
@@ -518,16 +567,14 @@ class RAGwithLogging:
                 response=str(response.response),
                 source_document=self.documents[0].metadata.get("source", "unknown"),
                 system_prompt=response.prompt,
-                model_name=self.model_config['model_name'],
-                model_type=self.model_config['model_provider'],
-                model_parameters=self.model_config['model_parameters'],
+                model_name=self.model_config["model_name"],
+                model_type=self.model_config["model_provider"],
+                model_parameters=self.model_config["model_parameters"],
                 retrieved_context=retrieved_context,
                 metadata={"processing_time": processing_time},
-                processing_time=processing_time
+                processing_time=processing_time,
             )
             return response.response
-
-            
 
         except Exception as e:
             self.logger.log_system_event(
@@ -535,46 +582,41 @@ class RAGwithLogging:
                 message=f"Error executing query: {str(e)}",
                 module=__name__,
                 function="_query",
-                traceback=traceback.format_exc()
+                traceback=traceback.format_exc(),
             )
-            
 
 
 def setup_argparse() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description='RAG System with Logging - Command Line Interface',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description="RAG System with Logging - Command Line Interface",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    
+
     parser.add_argument(
-        '--data-dir',
+        "--data-dir",
         type=str,
         required=True,
-        help='Directory containing the document files'
+        help="Directory containing the document files",
     )
-    
+
     parser.add_argument(
-        '--log-dir',
+        "--log-dir",
         type=str,
-        default='logs',
-        help='Directory for storing logs (default: logs)'
+        default="logs",
+        help="Directory for storing logs (default: logs)",
     )
-    
+
+    parser.add_argument("--query", type=str, required=True, help="The query to process")
+
     parser.add_argument(
-        '--query',
-        type=str,
-        required=True,
-        help='The query to process'
-    )
-    
-    parser.add_argument(
-        '--top-k',
+        "--top-k",
         type=int,
         default=3,
-        help='Number of similar documents to retrieve (default: 3)'
+        help="Number of similar documents to retrieve (default: 3)",
     )
-    
+
     return parser
+
 
 def main():
     # Load environment variables
@@ -584,19 +626,19 @@ def main():
     root_dir = Path(os.environ.get("ROOT_DIR", "../.."))
     log_dir = root_dir / "logs"
     log_dir.mkdir(exist_ok=True)
-    
+
     # Check for OpenAI API key
     if not os.getenv("OPENAI_API_KEY"):
         print("Error: OPENAI_API_KEY not found in environment variables")
         sys.exit(1)
-    
+
     # Parse command line arguments
     parser = setup_argparse()
     args = parser.parse_args()
-    
+
     # Configure model
     model_config = MODEL_CONFIG
-    
+
     try:
         # Initialize RAG system
         print(f"Initializing RAG system with data from: {args.data_dir}")
@@ -604,34 +646,24 @@ def main():
             data_dir=args.data_dir,
             model_config=model_config,
             log_dir=args.log_dir,
-            similarity_topk=args.top_k
+            similarity_topk=args.top_k,
         )
-        
+
         # Process query
         print("\nProcessing query:", args.query)
-        response = rag_system.query(
-            query=args.query,
-            model_config=model_config
-        )
-        
+        response = rag_system.query(query=args.query, model_config=model_config)
+
         # Print response
         print("\nResponse:")
         print("-" * 80)
         print(response)
         print("-" * 80)
         print(f"\nLogs have been saved to: {args.log_dir}")
-        
+
     except Exception as e:
         print(f"Error: {str(e)}")
         sys.exit(1)
 
+
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-

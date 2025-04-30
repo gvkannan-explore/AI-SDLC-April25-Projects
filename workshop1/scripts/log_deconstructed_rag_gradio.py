@@ -2,26 +2,23 @@
 # - Using the RAG system from HW1, add logging capabilities to the system in orde to create a minimum viable evaluation setup.
 # - Log interaction into a json file!
 
-import argparse
-import os
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
-import sys
-from dotenv import load_dotenv
-import gradio as gr
-from datetime import datetime
-import uuid
-from tqdm.notebook import tqdm
-import traceback
-from rich import print
 import json
-import re
-import pandas as pd
-import openai
-import torch
-from torch.nn import functional as F
 import logging
+import os
+import sys
+import traceback
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
+import gradio as gr
+import openai
+import pandas as pd
+import torch
+from dotenv import load_dotenv
+from rich import print
+from torch.nn import functional as F
 
 MODEL_CONFIG = {
         "model_name": "gpt-4o-mini",
