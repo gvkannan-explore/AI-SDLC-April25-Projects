@@ -3,3 +3,7 @@ workshop1/apps/*
 .DS_Store
 *.db
 *.json
+workshop1/scripts/apps/data/*.txt
+workshop1/scripts/data/*.txt
+workshop1/scripts/.gradio/flagged/*.csv
+workshop1/scripts/.gradio/certificate.pem

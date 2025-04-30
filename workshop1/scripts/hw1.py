@@ -282,10 +282,10 @@ if __name__ == "__main__":
     load_dotenv(dotenv_path="../../project_secrets.env")
     load_dotenv(dotenv_path="../../../ai_sdlc_secrets.env")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    documents = SimpleDirectoryReader("../apps/data").load_data()
+    documents = SimpleDirectoryReader("../apps/data").load_data() ## TO DO: Update this to only add files that are relevant to the query
 
 
-    ## Unleas the RAG!
+    ## Unleash the RAG!
     vector_index = VectorStoreIndex.from_documents(documents=documents, embedding_service=OpenAIEmbedding())
     query_engine = vector_index.as_query_engine(response_synthesizer=LLMResponseSynthesizer(), similarity_topk=2)
     response = query_engine.query(query=args.query)
